@@ -1,0 +1,130 @@
+
+library(e1071)
+library(caret)
+library(nnet)
+
+# load the data
+obesity = read.csv("Obesity.csv")
+
+sum(is.na(obesity))
+dim(obesity)
+summary(obesity)
+
+###################################################################
+# Data pre-processing
+
+#round age variable to even numbers, for the synthetic data
+obesity$Age = round(obesity$Age,0)
+# Round weight and height to decimals ; height in m
+obesity$Height = round(obesity$Height,2) 
+obesity$Weight = round(obesity$Weight,1)
+
+# Adjust values for Veggies, Main_meals, Water, Physical_activity, Tech_time
+obesity$Veggies = ifelse(obesity$Veggies > 2.5, 3, ifelse(obesity$Veggies > 1.5,2,1))
+obesity$Main_meals = ifelse(obesity$Main_meals>3.5,4, ifelse(obesity$Main_meals>2.5,3,
+                                                             ifelse(obesity$Main_meals>1.5,2,1)))
+obesity$Water = ifelse(obesity$Water > 2.5, 3, ifelse(obesity$Water > 1.5,2,1))
+obesity$Physical_activity = ifelse(obesity$Physical_activity>2.5,3, ifelse(obesity$Physical_activity>1.5,2,
+                                                             ifelse(obesity$Physical_activity>0.5,1,0)))
+obesity$Tech_time = ifelse(obesity$Tech_time > 1.5, 2, ifelse(obesity$Tech_time > 0.5,1,0))
+
+# Change weight status to two categories for Naive Bayes and logistic regression
+obesity$Weight_cat = ifelse(obesity$Weight_status=="Normal_Weight", 
+                            "Healthy", "Unhealthy")
+
+#as.data.frame(table(obesity$Alcohol))
+
+# Remove outliers, "Weight" and "Height" variables
+obesity = obesity[-27,-c(3,4,17)]
+
+#######################################################################################
+## Naive Bayes analysis
+
+obesity.nb = obesity[,-17]
+# Convert "Age", "Height", "Weight" to categorical variables
+obesity.nb$Age = ifelse(obesity.nb$Age > 55,"old",ifelse(obesity.nb$Age > 35,"middle","young"))
+
+# Partition the data into training (60%), validation sets (40%) 
+train.rows = sample(rownames(obesity.nb), dim(obesity.nb)[1]*0.5)
+valid.rows = setdiff(rownames(obesity.nb), train.rows)
+train_nb = obesity.nb[train.rows, ]
+valid_nb = obesity.nb[valid.rows, ]
+
+# Convert the variables to factors for both the training and validation data
+for (i in 15){
+  train_nb[,i] = as.factor(train_nb[,i])
+  valid_nb[,i] = as.factor(valid_nb[,i])
+  test_nb[,i] = as.factor(test_nb[,i])
+}
+
+#Run Naive Bayes with all the predictors
+nb = naiveBayes(Weight_cat ~ ., data = train_nb)
+
+# PRediction using validation set
+pred.nb.valid = predict(nb, newdata = valid_nb)
+
+#Confusion Matrix on validation set
+confusionMatrix(pred.nb.valid, valid_nb$Weight_cat)
+
+
+
+############################################################################################# 
+## Logistic Regression
+
+obesity.logit = obesity[,-17]
+
+# Convert weights categories to two dummies variables
+obesity.logit$Weight_cat = ifelse(obesity.logit$Weight_cat =="Healthy",1,0)
+
+# Partition the data into training (60%), validation sets (40%) 
+train.rows = sample(rownames(obesity.logit), dim(obesity.logit)[1]*0.6)
+valid.rows = setdiff(rownames(obesity.logit), train.rows)
+train_logit = obesity.logit[train.rows, ]
+valid_logit = obesity.logit[valid.rows, ]
+
+#Run logistic regression with all the predictors
+logit = glm(Weight_cat ~ ., data = train_logit, family = "binomial") 
+
+# prediction using validation set
+pred.logit.valid =  predict(logit, valid_logit, type = "response")
+
+# Confusion matrix on validation set
+confusionMatrix(relevel(as.factor(ifelse(pred.logit.valid>0.5,1,0)), ref = "1"),
+                relevel(as.factor(valid_logit$Weight_cat), ref ="1"))
+
+
+#################################################################################################
+## Multinomial Logistic regression
+
+obesity.ml = obesity
+
+# change weight categories from two to four (Normal_weight, Underweight, Overweight, Obese)
+obesity.ml$Weight_cat = ifelse(obesity.ml$Weight_status=="Normal_Weight", "Normal_weight",
+                              ifelse(obesity.ml$Weight_status=="Insufficient_Weight","Underweight",
+                              ifelse(obesity.ml$Weight_status=="Overweight_Level_I","Overweight",
+                                     ifelse(obesity.ml$Weight_status=="Overweight_Level_II","Overweight",
+                                             "Obese"))))
+
+obesity.ml = obesity.ml[,-17]
+# convert target variable to factor and relevel to four levels
+obesity.ml$Weight_cat = as.factor(obesity.ml$Weight_cat)
+obesity.ml$Weight_cat2 = relevel(obesity.ml$Weight_cat, ref = "Normal_weight")
+
+# Partition the data into training (60%), validation sets (40%)
+train.rows = sample(rownames(obesity.ml), dim(obesity.ml)[1]*0.6)
+valid.rows = setdiff(rownames(obesity.ml), train.rows)
+train_ml = obesity.ml[train.rows, ]
+valid_ml = obesity.ml[valid.rows, ]
+
+# Run multinomial logistic regression with all the predictors
+multi_logit = multinom(Weight_cat2 ~., data=train_ml)
+summary(multi_logit)
+
+# prediction using validation set
+predict = predict(multi_logit, newdata = valid_ml, type = "class")
+
+# Confusion matrix on validation set
+confusionMatrix(relevel(as.factor(predict),ref="Normal_weight"),
+                relevel(as.factor(valid_ml$Weight_cat2), ref="Normal_weight"))
+
+
